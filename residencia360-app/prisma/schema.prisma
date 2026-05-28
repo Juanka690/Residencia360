@@ -1,0 +1,498 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  RESIDENT
+  GUARD
+  ADMIN
+  BOARD
+  CONTRACTOR
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum VisitStatus {
+  PRE_REGISTERED
+  APPROVED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  REJECTED
+}
+
+enum GateType {
+  PEDESTRIAN
+  VEHICULAR
+}
+
+enum AnnouncementAudience {
+  WHOLE_COMMUNITY
+  TOWER
+  BLOCK
+}
+
+enum PqrsStatus {
+  FILED
+  IN_PROGRESS
+  THIRD_PARTY_PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum PqrsPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ReservationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum LedgerStatus {
+  CURRENT
+  IN_ARREARS
+}
+
+enum ChargeStatus {
+  PENDING
+  PAID
+  PARTIAL
+  VOID
+}
+
+enum PaymentStatus {
+  SUBMITTED
+  APPLIED
+  REJECTED
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ParkingSpotType {
+  VISITOR
+}
+
+enum ProviderAccessStatus {
+  PRE_REGISTERED
+  APPROVED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  REJECTED
+}
+
+model Tower {
+  id        String            @id @default(cuid())
+  name      String            @unique
+  code      String            @unique
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  units     ResidentialUnit[]
+  users     User[]
+  announcements Announcement[]
+}
+
+model ResidentialUnit {
+  id           String         @id @default(cuid())
+  towerId       String
+  tower         Tower          @relation(fields: [towerId], references: [id])
+  number        String
+  floor         Int
+  apartmentCode String        @unique
+  residents     User[]
+  visits        Visit[]
+  pqrsTickets   Pqrs[]
+  reservations  Reservation[]
+  account       LedgerAccount?
+  providers     ProviderAccess[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([towerId, number])
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  email              String              @unique
+  passwordHash       String
+  firstName          String
+  lastName           String
+  phone              String?
+  document           String?             @unique
+  role               Role
+  status             UserStatus          @default(ACTIVE)
+  towerId            String?
+  tower              Tower?              @relation(fields: [towerId], references: [id])
+  apartmentId        String?
+  apartment          ResidentialUnit?    @relation(fields: [apartmentId], references: [id])
+  lastLoginAt        DateTime?
+  failedLoginCount   Int                 @default(0)
+  lockedUntil        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  createdAnnouncements Announcement[]    @relation("AnnouncementCreator")
+  visitRequests      Visit[]             @relation("VisitResident")
+  createdVisits      Visit[]             @relation("VisitCreator")
+  approvedVisits     Visit[]             @relation("VisitApprover")
+  visitEntries       Visit[]             @relation("VisitGuardIn")
+  visitExits         Visit[]             @relation("VisitGuardOut")
+  filedPqrs          Pqrs[]              @relation("PqrsResident")
+  assignedPqrs       Pqrs[]              @relation("PqrsAssignee")
+  pqrsComments       PqrsComment[]
+  reservations       Reservation[]       @relation("ReservationResident")
+  approvedReservations Reservation[]     @relation("ReservationApprover")
+  providerAuthorizations ProviderAccess[] @relation("ProviderAuthorizer")
+  providerEntries    ProviderAccess[]    @relation("ProviderGuardIn")
+  providerExits      ProviderAccess[]    @relation("ProviderGuardOut")
+  createdPayments    Payment[]           @relation("PaymentCreator")
+  validatedPayments  Payment[]           @relation("PaymentValidator")
+  reviewedSupports   PaymentSupport[]    @relation("SupportReviewer")
+  announcementReads  AnnouncementRead[]
+  auditLogs          AuditLog[]
+  resetTokens        PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+}
+
+model Visitor {
+  id         String  @id @default(cuid())
+  fullName   String
+  document   String
+  phone      String?
+  email      String?
+  vehiclePlate String?
+  visits     Visit[]
+
+  @@unique([document, fullName])
+}
+
+model Visit {
+  id             String      @id @default(cuid())
+  code           String      @unique
+  visitorId      String
+  visitor        Visitor     @relation(fields: [visitorId], references: [id])
+  residentId     String
+  resident       User        @relation("VisitResident", fields: [residentId], references: [id])
+  apartmentId    String
+  apartment      ResidentialUnit @relation(fields: [apartmentId], references: [id])
+  createdById    String
+  createdBy      User        @relation("VisitCreator", fields: [createdById], references: [id])
+  approvedById   String?
+  approvedBy     User?       @relation("VisitApprover", fields: [approvedById], references: [id])
+  guardInId      String?
+  guardIn        User?       @relation("VisitGuardIn", fields: [guardInId], references: [id])
+  guardOutId     String?
+  guardOut       User?       @relation("VisitGuardOut", fields: [guardOutId], references: [id])
+  gateType       GateType    @default(PEDESTRIAN)
+  reason         String
+  notes          String?
+  qrToken        String      @unique
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  approvedAt     DateTime?
+  checkedInAt    DateTime?
+  checkedOutAt   DateTime?
+  status         VisitStatus @default(PRE_REGISTERED)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  parkingAssignments VisitorParkingAssignment[]
+
+  @@index([status, scheduledStart])
+  @@index([apartmentId, scheduledStart])
+}
+
+model ProviderCompany {
+  id            String           @id @default(cuid())
+  name          String
+  taxId         String?          @unique
+  contactName   String
+  contactPhone  String
+  contactEmail  String?
+  isActive      Boolean          @default(true)
+  accesses      ProviderAccess[]
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+}
+
+model ProviderAccess {
+  id             String               @id @default(cuid())
+  code           String               @unique
+  providerId     String
+  provider       ProviderCompany      @relation(fields: [providerId], references: [id])
+  apartmentId    String?
+  apartment      ResidentialUnit?     @relation(fields: [apartmentId], references: [id])
+  authorizedById String
+  authorizedBy   User                 @relation("ProviderAuthorizer", fields: [authorizedById], references: [id])
+  pqrsId         String?
+  pqrs           Pqrs?                @relation(fields: [pqrsId], references: [id])
+  workOrderRef   String?
+  activity       String
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  status         ProviderAccessStatus @default(PRE_REGISTERED)
+  guardInId      String?
+  guardIn        User?                @relation("ProviderGuardIn", fields: [guardInId], references: [id])
+  guardOutId     String?
+  guardOut       User?                @relation("ProviderGuardOut", fields: [guardOutId], references: [id])
+  checkedInAt    DateTime?
+  checkedOutAt   DateTime?
+  notes          String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  parkingAssignments VisitorParkingAssignment[]
+}
+
+model ParkingSpot {
+  id           String                     @id @default(cuid())
+  label        String                     @unique
+  type         ParkingSpotType            @default(VISITOR)
+  isActive     Boolean                    @default(true)
+  assignments  VisitorParkingAssignment[]
+}
+
+model VisitorParkingAssignment {
+  id               String          @id @default(cuid())
+  parkingSpotId    String
+  parkingSpot      ParkingSpot     @relation(fields: [parkingSpotId], references: [id])
+  visitId          String?
+  visit            Visit?          @relation(fields: [visitId], references: [id])
+  providerAccessId String?
+  providerAccess   ProviderAccess? @relation(fields: [providerAccessId], references: [id])
+  startAt          DateTime
+  endAt            DateTime
+  createdAt        DateTime        @default(now())
+
+  @@index([parkingSpotId, startAt, endAt])
+}
+
+model Announcement {
+  id          String                @id @default(cuid())
+  title       String
+  summary     String
+  content     String
+  critical    Boolean               @default(false)
+  audience    AnnouncementAudience  @default(WHOLE_COMMUNITY)
+  towerId     String?
+  tower       Tower?                @relation(fields: [towerId], references: [id])
+  publishAt   DateTime              @default(now())
+  expiresAt   DateTime?
+  createdById String
+  createdBy   User                  @relation("AnnouncementCreator", fields: [createdById], references: [id])
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  attachments AnnouncementAttachment[]
+  reads       AnnouncementRead[]
+}
+
+model AnnouncementAttachment {
+  id             String       @id @default(cuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  fileName       String
+  fileUrl        String
+}
+
+model AnnouncementRead {
+  id             String       @id @default(cuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt         DateTime     @default(now())
+
+  @@unique([announcementId, userId])
+}
+
+model Pqrs {
+  id            String        @id @default(cuid())
+  ticketNumber  String        @unique
+  category      String
+  subject       String
+  description   String
+  priority      PqrsPriority  @default(MEDIUM)
+  status        PqrsStatus    @default(FILED)
+  residentId    String
+  resident      User          @relation("PqrsResident", fields: [residentId], references: [id])
+  apartmentId   String
+  apartment     ResidentialUnit @relation(fields: [apartmentId], references: [id])
+  assignedToId  String?
+  assignedTo    User?         @relation("PqrsAssignee", fields: [assignedToId], references: [id])
+  slaDueAt      DateTime
+  closedAt      DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  comments      PqrsComment[]
+  attachments   PqrsAttachment[]
+  providerAccesses ProviderAccess[]
+
+  @@index([status, priority])
+}
+
+model PqrsComment {
+  id         String   @id @default(cuid())
+  pqrsId      String
+  pqrs        Pqrs     @relation(fields: [pqrsId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id])
+  message     String
+  internal    Boolean  @default(false)
+  evidenceUrl String?
+  createdAt   DateTime @default(now())
+}
+
+model PqrsAttachment {
+  id         String   @id @default(cuid())
+  pqrsId      String
+  pqrs        Pqrs     @relation(fields: [pqrsId], references: [id], onDelete: Cascade)
+  fileName    String
+  fileUrl     String
+  uploadedAt  DateTime @default(now())
+}
+
+model CommonArea {
+  id                          String         @id @default(cuid())
+  name                        String         @unique
+  description                 String
+  capacity                    Int
+  color                       String         @default("#1d4ed8")
+  minimumAdvanceHours         Int            @default(24)
+  maxActiveReservationsWeekly Int            @default(1)
+  blockIfInArrears            Boolean        @default(true)
+  reservations                Reservation[]
+  maintenanceBlocks           MaintenanceBlock[]
+}
+
+model MaintenanceBlock {
+  id          String     @id @default(cuid())
+  areaId      String
+  area        CommonArea @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  startAt     DateTime
+  endAt       DateTime
+  reason      String
+  createdAt   DateTime   @default(now())
+}
+
+model Reservation {
+  id           String            @id @default(cuid())
+  areaId        String
+  area          CommonArea        @relation(fields: [areaId], references: [id])
+  residentId    String
+  resident      User              @relation("ReservationResident", fields: [residentId], references: [id])
+  apartmentId   String
+  apartment     ResidentialUnit   @relation(fields: [apartmentId], references: [id])
+  startAt       DateTime
+  endAt         DateTime
+  attendees     Int
+  purpose       String
+  status        ReservationStatus @default(PENDING)
+  approvedById  String?
+  approvedBy    User?             @relation("ReservationApprover", fields: [approvedById], references: [id])
+  approvedAt    DateTime?
+  rejectionReason String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([areaId, startAt, endAt])
+}
+
+model LedgerAccount {
+  id            String       @id @default(cuid())
+  apartmentId   String       @unique
+  apartment     ResidentialUnit @relation(fields: [apartmentId], references: [id])
+  balance       Int          @default(0)
+  dueAmount     Int          @default(0)
+  overdueAmount Int          @default(0)
+  status        LedgerStatus @default(CURRENT)
+  lastUpdatedAt DateTime     @default(now())
+  charges       Charge[]
+  payments      Payment[]
+}
+
+model Charge {
+  id             String       @id @default(cuid())
+  ledgerAccountId String
+  ledgerAccount  LedgerAccount @relation(fields: [ledgerAccountId], references: [id], onDelete: Cascade)
+  concept        String
+  periodLabel    String
+  amount         Int
+  dueDate        DateTime
+  status         ChargeStatus @default(PENDING)
+  appliedAt      DateTime?
+  createdAt      DateTime     @default(now())
+}
+
+model Payment {
+  id              String       @id @default(cuid())
+  ledgerAccountId String
+  ledgerAccount   LedgerAccount @relation(fields: [ledgerAccountId], references: [id], onDelete: Cascade)
+  reference       String       @unique
+  amount          Int
+  paidAt          DateTime
+  status          PaymentStatus @default(SUBMITTED)
+  notes           String?
+  createdById     String?
+  createdBy       User?        @relation("PaymentCreator", fields: [createdById], references: [id])
+  validatedById   String?
+  validatedBy     User?        @relation("PaymentValidator", fields: [validatedById], references: [id])
+  validatedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  supports        PaymentSupport[]
+}
+
+model PaymentSupport {
+  id            String       @id @default(cuid())
+  paymentId      String
+  payment        Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  fileName       String
+  fileUrl        String
+  status         ReviewStatus @default(PENDING)
+  reviewedById   String?
+  reviewedBy     User?        @relation("SupportReviewer", fields: [reviewedById], references: [id])
+  reviewedAt     DateTime?
+  feedback       String?
+  createdAt      DateTime     @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId     String?
+  actor       User?    @relation(fields: [actorId], references: [id])
+  action      String
+  entityType  String
+  entityId    String?
+  detail      String
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, createdAt])
+  @@index([actorId, createdAt])
+}
