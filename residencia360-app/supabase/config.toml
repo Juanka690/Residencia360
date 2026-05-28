@@ -1,0 +1,4 @@
+project_id = "residencia360"
+
+[functions.send-notification]
+verify_jwt = false

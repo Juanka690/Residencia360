@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd residencia360-app && npm run vercel-build",
+  "installCommand": "cd residencia360-app && npm install",
+  "outputDirectory": "residencia360-app/.next",
+  "framework": "nextjs",
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/pqrs-escalation",
+      "schedule": "0 */6 * * *"
+    }
+  ]
+}
