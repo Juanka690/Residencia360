@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 
 import { GateControls } from "@/app/(app)/gate/gate-controls";
+import { QrScanner } from "@/app/(app)/gate/qr-scanner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageShell } from "@/components/page-shell";
@@ -29,6 +30,7 @@ export default async function GatePage({
             <Search className="h-4 w-4" />
             Buscar
           </Button>
+          <QrScanner />
         </form>
         {selected ? (
           <div className="mt-6 rounded-2xl border border-border bg-muted/40 p-4">

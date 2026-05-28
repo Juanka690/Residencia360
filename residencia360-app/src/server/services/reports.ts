@@ -155,3 +155,52 @@ export async function getVisitsExportTotal(filters: ReportFilters = {}) {
     where: buildVisitWhere(filters),
   });
 }
+
+export async function getVisitsTimeline(filters: ReportFilters = {}, days = 30) {
+  const end = filters.endDate ? new Date(`${filters.endDate}T23:59:59.999`) : new Date();
+  const start = filters.startDate
+    ? new Date(`${filters.startDate}T00:00:00`)
+    : new Date(end.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+
+  const visits = await db.visit.findMany({
+    where: {
+      ...buildVisitWhere(filters),
+      scheduledStart: { gte: start, lte: end },
+    },
+    select: { scheduledStart: true },
+  });
+
+  const counts = new Map<string, number>();
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    const key = cursor.toISOString().slice(5, 10); // MM-DD
+    counts.set(key, 0);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  for (const visit of visits) {
+    const key = visit.scheduledStart.toISOString().slice(5, 10);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return Array.from(counts.entries()).map(([date, visits]) => ({ date, visits }));
+}
+
+export async function getPqrsPriorityBreakdown(filters: ReportFilters = {}) {
+  const grouped = await db.pqrs.groupBy({
+    by: ["priority"],
+    _count: true,
+    where: buildPqrsWhere(filters),
+  });
+  return grouped.map((g) => ({ name: g.priority, value: g._count }));
+}
+
+export async function getReservationsByAreaBreakdown(filters: ReportFilters = {}) {
+  const reservations = await db.reservation.findMany({
+    where: buildReservationWhere(filters),
+    select: { area: { select: { name: true } } },
+  });
+  const counts = new Map<string, number>();
+  for (const r of reservations) {
+    counts.set(r.area.name, (counts.get(r.area.name) ?? 0) + 1);
+  }
+  return Array.from(counts.entries()).map(([name, value]) => ({ name, value }));
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { FileUpload, type UploadedFile } from "@/components/file-upload";
+import { BUCKETS } from "@/lib/supabase-storage";
 
 const schema = z.object({
   title: z.string().min(4),
@@ -31,6 +33,7 @@ export function AnnouncementForm({
   actorId: string;
   towers: { id: string; name: string }[];
 }) {
+  const [attachments, setAttachments] = useState<UploadedFile[]>([]);
   const [isPending, startTransition] = useTransition();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -50,6 +53,10 @@ export function AnnouncementForm({
         {
           ...values,
           critical: Boolean(values.critical),
+          attachments: attachments.map((a) => ({
+            fileName: a.fileName,
+            fileUrl: a.publicUrl ?? a.path,
+          })),
         },
         actorId,
       );
@@ -58,6 +65,7 @@ export function AnnouncementForm({
         return;
       }
       toast.success(result.message);
+      setAttachments([]);
       form.reset();
     });
   });
@@ -105,6 +113,32 @@ export function AnnouncementForm({
             </SelectContent>
           </Select>
         </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Archivos adjuntos</Label>
+        <FileUpload
+          bucket={BUCKETS.ANNOUNCEMENTS}
+          pathPrefix="announcements"
+          buttonLabel="Adjuntar archivo"
+          onUploaded={(file) => setAttachments((prev) => [...prev, file])}
+          onCleared={() => setAttachments([])}
+        />
+        {attachments.length > 0 ? (
+          <ul className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 space-y-1">
+            {attachments.map((a) => (
+              <li key={a.path} className="flex items-center justify-between gap-2">
+                <span>{a.fileName}</span>
+                <button
+                  type="button"
+                  className="text-rose-600 hover:underline"
+                  onClick={() => setAttachments((prev) => prev.filter((p) => p.path !== a.path))}
+                >
+                  Quitar
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" {...form.register("critical")} />

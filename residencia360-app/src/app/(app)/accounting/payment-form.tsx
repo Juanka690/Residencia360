@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,19 +10,21 @@ import { reviewPaymentSupportAction, submitPaymentSupportAction } from "@/server
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FileUpload, type UploadedFile } from "@/components/file-upload";
+import { BUCKETS } from "@/lib/supabase-storage";
 
 const submitSchema = z.object({
   apartmentId: z.string().min(1),
   reference: z.string().min(4),
   amount: z.coerce.number().min(1),
   paidAt: z.string().min(1),
-  fileName: z.string().min(3),
   notes: z.string().optional(),
 });
 
 type SubmitValues = z.input<typeof submitSchema>;
 
 export function PaymentSupportForm({ apartmentId, actorId }: { apartmentId: string; actorId: string }) {
+  const [support, setSupport] = useState<UploadedFile | null>(null);
   const [isPending, startTransition] = useTransition();
   const form = useForm<SubmitValues>({
     resolver: zodResolver(submitSchema),
@@ -31,17 +33,22 @@ export function PaymentSupportForm({ apartmentId, actorId }: { apartmentId: stri
       reference: "",
       amount: "0",
       paidAt: "",
-      fileName: "",
       notes: "",
     },
   });
 
   const onSubmit = form.handleSubmit((values) => {
+    if (!support) {
+      toast.error("Debes adjuntar el soporte del pago.");
+      return;
+    }
     startTransition(async () => {
       const result = await submitPaymentSupportAction(
         {
           ...values,
           amount: Number(values.amount),
+          fileName: support.fileName,
+          fileUrl: support.publicUrl ?? support.path,
         },
         actorId,
       );
@@ -50,7 +57,8 @@ export function PaymentSupportForm({ apartmentId, actorId }: { apartmentId: stri
         return;
       }
       toast.success(result.message);
-      form.reset({ ...form.getValues(), reference: "", amount: 0, paidAt: "", fileName: "", notes: "" });
+      setSupport(null);
+      form.reset({ ...form.getValues(), reference: "", amount: 0, paidAt: "", notes: "" });
     });
   });
 
@@ -69,8 +77,14 @@ export function PaymentSupportForm({ apartmentId, actorId }: { apartmentId: stri
         <Input type="datetime-local" {...form.register("paidAt")} />
       </div>
       <div className="space-y-2">
-        <Label>Nombre del soporte</Label>
-        <Input placeholder="soporte-transferencia.pdf" {...form.register("fileName")} />
+        <Label>Soporte</Label>
+        <FileUpload
+          bucket={BUCKETS.PAYMENTS}
+          pathPrefix={`apartment-${apartmentId}`}
+          buttonLabel="Adjuntar comprobante"
+          onUploaded={setSupport}
+          onCleared={() => setSupport(null)}
+        />
       </div>
       <div className="space-y-2 md:col-span-2">
         <Label>Notas</Label>

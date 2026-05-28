@@ -4,8 +4,14 @@ import { ReservationStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import "@/server/bootstrap";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/server/actions/helpers";
+import { fromDomainError, EntidadNoEncontrada, type ActionResult } from "@/server/domain/errors/domain-errors";
+import { buildEvent } from "@/server/domain/events/domain-events";
+import { eventBus } from "@/server/domain/events/event-bus";
+import { ReservationValidator } from "@/server/domain/policies/reservation-rules";
+import { reservationRepo } from "@/server/repositories/prisma/reservation-repo";
 
 const reservationSchema = z.object({
   areaId: z.string().min(1),
@@ -16,88 +22,90 @@ const reservationSchema = z.object({
   purpose: z.string().min(6),
 });
 
-export async function createReservationAction(input: z.infer<typeof reservationSchema>, residentId: string) {
+const validator = new ReservationValidator();
+
+export async function createReservationAction(
+  input: z.infer<typeof reservationSchema>,
+  residentId: string,
+): Promise<ActionResult<{ reservationId: string }>> {
   const parsed = reservationSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, message: "Datos de reserva invalidos." };
   }
 
-  const area = await db.commonArea.findUnique({ where: { id: parsed.data.areaId } });
-  if (!area) {
-    return { success: false, message: "Zona comun no encontrada." };
+  try {
+    const startAt = new Date(parsed.data.startAt);
+    const endAt = new Date(parsed.data.endAt);
+    const now = new Date();
+    const sinceWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const area = await reservationRepo.findArea(parsed.data.areaId);
+    if (!area) throw new EntidadNoEncontrada("Zona comun");
+
+    const account = await reservationRepo.findAccount(parsed.data.apartmentId);
+    const reservationsOverlap = await reservationRepo.findOverlaps(area.id, startAt, endAt);
+    const maintenanceOverlap = await reservationRepo.findMaintenanceOverlaps(area.id, startAt, endAt);
+    const reservationsLastWeek = await reservationRepo.countWeekly(parsed.data.apartmentId, sinceWeek);
+
+    validator.validar(
+      {
+        areaId: area.id,
+        apartmentId: parsed.data.apartmentId,
+        startAt,
+        endAt,
+        attendees: parsed.data.attendees,
+      },
+      {
+        area,
+        account,
+        reservationsOverlap,
+        maintenanceOverlap,
+        reservationsLastWeek,
+        now,
+      },
+    );
+
+    const reservation = await db.reservation.create({
+      data: {
+        areaId: area.id,
+        apartmentId: parsed.data.apartmentId,
+        residentId,
+        startAt,
+        endAt,
+        attendees: parsed.data.attendees,
+        purpose: parsed.data.purpose,
+        status: ReservationStatus.PENDING,
+      },
+    });
+
+    await writeAuditLog({
+      actorId: residentId,
+      action: "RESERVATION_CREATED",
+      entityType: "Reservation",
+      entityId: reservation.id,
+      detail: `Reserva creada para ${area.name}.`,
+    });
+
+    await eventBus.publish(
+      buildEvent(
+        "ReservaCreada",
+        {
+          reservationId: reservation.id,
+          areaName: area.name,
+          residentId,
+          startAt,
+          endAt,
+          status: reservation.status,
+        },
+        residentId,
+      ),
+    );
+
+    revalidatePath("/reservations");
+    return { success: true, message: "Reserva creada.", data: { reservationId: reservation.id } };
+  } catch (err) {
+    return fromDomainError(err, "No se pudo crear la reserva.");
   }
-
-  const account = await db.ledgerAccount.findUnique({
-    where: { apartmentId: parsed.data.apartmentId },
-  });
-
-  if (area.blockIfInArrears && account?.status === "IN_ARREARS") {
-    return { success: false, message: "No puedes reservar mientras el apartamento este en mora." };
-  }
-
-  const startAt = new Date(parsed.data.startAt);
-  const endAt = new Date(parsed.data.endAt);
-  const hoursDiff = (startAt.getTime() - Date.now()) / (1000 * 60 * 60);
-
-  if (hoursDiff < area.minimumAdvanceHours) {
-    return { success: false, message: `Debes reservar con al menos ${area.minimumAdvanceHours} horas de anticipacion.` };
-  }
-
-  const overlap = await db.reservation.findFirst({
-    where: {
-      areaId: area.id,
-      status: { in: [ReservationStatus.PENDING, ReservationStatus.APPROVED] },
-      startAt: { lt: endAt },
-      endAt: { gt: startAt },
-    },
-  });
-
-  if (overlap) {
-    return { success: false, message: "Ya existe una reserva en esa franja horaria." };
-  }
-
-  const maintenance = await db.maintenanceBlock.findFirst({
-    where: {
-      areaId: area.id,
-      startAt: { lt: endAt },
-      endAt: { gt: startAt },
-    },
-  });
-
-  if (maintenance) {
-    return { success: false, message: "La fecha esta bloqueada por mantenimiento." };
-  }
-
-  const weekCount = await db.reservation.count({
-    where: {
-      apartmentId: parsed.data.apartmentId,
-      status: { in: [ReservationStatus.PENDING, ReservationStatus.APPROVED] },
-      startAt: { gte: new Date(new Date(startAt).setDate(startAt.getDate() - 7)) },
-    },
-  });
-
-  if (weekCount >= area.maxActiveReservationsWeekly) {
-    return { success: false, message: "Se alcanzo el maximo de reservas activas por semana." };
-  }
-
-  await db.reservation.create({
-    data: {
-      ...parsed.data,
-      residentId,
-      startAt,
-      endAt,
-    },
-  });
-
-  await writeAuditLog({
-    actorId: residentId,
-    action: "RESERVATION_CREATED",
-    entityType: "Reservation",
-    detail: `Reserva creada para ${area.name}.`,
-  });
-
-  revalidatePath("/reservations");
-  return { success: true, message: "Reserva creada." };
 }
 
 export async function reviewReservationAction(
@@ -105,25 +113,45 @@ export async function reviewReservationAction(
   actorId: string,
   status: "APPROVED" | "REJECTED",
   rejectionReason?: string,
-) {
-  await db.reservation.update({
-    where: { id: reservationId },
-    data: {
-      status,
-      approvedById: actorId,
-      approvedAt: new Date(),
-      rejectionReason: status === ReservationStatus.REJECTED ? rejectionReason : null,
-    },
-  });
+): Promise<ActionResult> {
+  try {
+    const updated = await db.reservation.update({
+      where: { id: reservationId },
+      data: {
+        status,
+        approvedById: actorId,
+        approvedAt: new Date(),
+        rejectionReason: status === ReservationStatus.REJECTED ? rejectionReason : null,
+      },
+      include: { area: true },
+    });
 
-  await writeAuditLog({
-    actorId,
-    action: "RESERVATION_REVIEWED",
-    entityType: "Reservation",
-    entityId: reservationId,
-    detail: `Reserva ${status}.`,
-  });
+    await writeAuditLog({
+      actorId,
+      action: "RESERVATION_REVIEWED",
+      entityType: "Reservation",
+      entityId: reservationId,
+      detail: `Reserva ${status}.`,
+    });
 
-  revalidatePath("/reservations");
-  return { success: true, message: "Reserva actualizada." };
+    await eventBus.publish(
+      buildEvent(
+        status === "APPROVED" ? "ReservaAprobada" : "ReservaRechazada",
+        {
+          reservationId: updated.id,
+          areaName: updated.area.name,
+          residentId: updated.residentId,
+          startAt: updated.startAt,
+          endAt: updated.endAt,
+          status: updated.status,
+        },
+        actorId,
+      ),
+    );
+
+    revalidatePath("/reservations");
+    return { success: true, message: "Reserva actualizada." };
+  } catch (err) {
+    return fromDomainError(err, "No se pudo actualizar la reserva.");
+  }
 }

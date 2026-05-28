@@ -16,6 +16,7 @@ export const routePermissions: Record<string, Role[]> = {
   "/audit": [Role.ADMIN, Role.BOARD],
   "/providers": [Role.GUARD, Role.ADMIN, Role.BOARD],
   "/parking": [Role.GUARD, Role.ADMIN],
+  "/admin": [Role.ADMIN],
 };
 
 export function canAccessPath(role: Role, pathname: string) {

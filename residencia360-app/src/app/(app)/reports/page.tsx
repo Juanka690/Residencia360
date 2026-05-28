@@ -6,7 +6,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageShell } from "@/components/page-shell";
 import { formatDateTime, parsePageParam, safeSearchParams } from "@/lib/utils";
 import { requirePath } from "@/server/auth/session";
-import { getBasicReportSummary, getVisitsExportRows, getVisitsExportTotal, listReportTowers } from "@/server/services/reports";
+import {
+  getBasicReportSummary,
+  getPqrsPriorityBreakdown,
+  getReservationsByAreaBreakdown,
+  getVisitsExportRows,
+  getVisitsExportTotal,
+  getVisitsTimeline,
+  listReportTowers,
+} from "@/server/services/reports";
+
+import { PriorityPieChart, StatusBarChart, VisitsTimelineChart } from "./charts";
 
 const VISIT_STATUS_OPTIONS = [
   { value: "", label: "Todos los estados" },
@@ -34,12 +44,18 @@ export default async function ReportsPage({
   const page = parsePageParam(params?.page);
   const pageSize = 25;
 
-  const [summary, exportRows, towers, totalVisits] = await Promise.all([
+  const [summary, exportRows, towers, totalVisits, timeline, priorityBreakdown, reservationsByArea] = await Promise.all([
     getBasicReportSummary(filters),
     getVisitsExportRows(filters, pageSize, page),
     listReportTowers(),
     getVisitsExportTotal(filters),
+    getVisitsTimeline(filters),
+    getPqrsPriorityBreakdown(filters),
+    getReservationsByAreaBreakdown(filters),
   ]);
+
+  const pqrsStatusData = summary.pqrs.map((item) => ({ name: item.status, value: item._count }));
+  const visitsStatusData = summary.visits.map((item) => ({ name: item.status, value: item._count }));
   const exportParams = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
     if (value) exportParams.set(key, value);
@@ -100,6 +116,49 @@ export default async function ReportsPage({
           <Card><CardHeader><CardTitle>Cartera</CardTitle></CardHeader><CardContent>{summary.overdueAccounts} apartamentos en mora</CardContent></Card>
         </div>
       </PageShell>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Visitas por dia</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <VisitsTimelineChart data={timeline} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>PQRS por prioridad</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PriorityPieChart data={priorityBreakdown} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Visitas por estado</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <StatusBarChart data={visitsStatusData} title="visitas" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>PQRS por estado</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <StatusBarChart data={pqrsStatusData} title="PQRS" />
+          </CardContent>
+        </Card>
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Reservas por zona</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <StatusBarChart data={reservationsByArea} title="reservas" />
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>Exportaciones</CardTitle>

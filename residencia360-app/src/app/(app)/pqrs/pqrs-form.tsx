@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { FileUpload, type UploadedFile } from "@/components/file-upload";
+import { BUCKETS } from "@/lib/supabase-storage";
 
 const schema = z.object({
   category: z.string().min(3),
@@ -19,12 +21,12 @@ const schema = z.object({
   description: z.string().min(20),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
   apartmentId: z.string().min(1),
-  attachmentName: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
 
 export function PqrsForm({ residentId, apartmentId }: { residentId: string; apartmentId: string }) {
+  const [attachment, setAttachment] = useState<UploadedFile | null>(null);
   const [isPending, startTransition] = useTransition();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -34,25 +36,32 @@ export function PqrsForm({ residentId, apartmentId }: { residentId: string; apar
       description: "",
       priority: "MEDIUM",
       apartmentId,
-      attachmentName: "",
     },
   });
 
   const onSubmit = form.handleSubmit((values) => {
     startTransition(async () => {
-      const result = await createPqrsAction(values, residentId);
+      const result = await createPqrsAction(
+        {
+          ...values,
+          attachmentName: attachment?.fileName,
+          attachmentUrl: attachment?.publicUrl ?? undefined,
+        },
+        residentId,
+      );
       if (!result.success) {
         toast.error(result.message);
         return;
       }
-      toast.success(`${result.message} ${result.ticketNumber}`);
+      const ticketNumber = result.data?.ticketNumber ?? "";
+      toast.success(`${result.message} ${ticketNumber}`.trim());
+      setAttachment(null);
       form.reset({
         ...form.getValues(),
         category: "",
         subject: "",
         description: "",
         priority: "MEDIUM",
-        attachmentName: "",
       });
     });
   });
@@ -71,10 +80,10 @@ export function PqrsForm({ residentId, apartmentId }: { residentId: string; apar
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="LOW">Baja</SelectItem>
-              <SelectItem value="MEDIUM">Media</SelectItem>
-              <SelectItem value="HIGH">Alta</SelectItem>
-              <SelectItem value="CRITICAL">Critica</SelectItem>
+              <SelectItem value="LOW">Baja (7 dias)</SelectItem>
+              <SelectItem value="MEDIUM">Media (72 horas)</SelectItem>
+              <SelectItem value="HIGH">Alta (24 horas)</SelectItem>
+              <SelectItem value="CRITICAL">Critica (4 horas)</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -89,7 +98,13 @@ export function PqrsForm({ residentId, apartmentId }: { residentId: string; apar
       </div>
       <div className="space-y-2">
         <Label>Adjunto opcional</Label>
-        <Input placeholder="evidencia-humedad.jpg" {...form.register("attachmentName")} />
+        <FileUpload
+          bucket={BUCKETS.PQRS}
+          pathPrefix={`apartment-${apartmentId}`}
+          buttonLabel="Adjuntar evidencia"
+          onUploaded={setAttachment}
+          onCleared={() => setAttachment(null)}
+        />
       </div>
       <Button type="submit" disabled={isPending}>
         {isPending ? "Radicando..." : "Crear PQRS"}
@@ -100,12 +115,19 @@ export function PqrsForm({ residentId, apartmentId }: { residentId: string; apar
 
 export function PqrsStatusActions({ pqrsId, actorId }: { pqrsId: string; actorId: string }) {
   const [finalResponse, setFinalResponse] = useState("");
-  const [evidenceFileName, setEvidenceFileName] = useState("");
+  const [evidence, setEvidence] = useState<UploadedFile | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const run = (status: "IN_PROGRESS" | "RESOLVED" | "CLOSED") =>
     startTransition(async () => {
-      const result = await updatePqrsStatusAction(pqrsId, status, actorId, finalResponse, evidenceFileName);
+      const result = await updatePqrsStatusAction(
+        pqrsId,
+        status,
+        actorId,
+        finalResponse,
+        evidence?.fileName,
+        evidence?.publicUrl ?? undefined,
+      );
       if (!result.success) {
         toast.error(result.message);
         return;
@@ -113,7 +135,7 @@ export function PqrsStatusActions({ pqrsId, actorId }: { pqrsId: string; actorId
       toast.success(result.message);
       if (status !== "IN_PROGRESS") {
         setFinalResponse("");
-        setEvidenceFileName("");
+        setEvidence(null);
       }
     });
 
@@ -128,12 +150,14 @@ export function PqrsStatusActions({ pqrsId, actorId }: { pqrsId: string; actorId
             placeholder="Describe la gestion realizada, el resultado y la evidencia disponible."
           />
         </div>
-        <div className="space-y-2">
-          <Label>Nombre de evidencia</Label>
-          <Input
-            value={evidenceFileName}
-            onChange={(event) => setEvidenceFileName(event.target.value)}
-            placeholder="cierre-pqrs-0001.pdf"
+        <div className="space-y-2 md:col-span-2">
+          <Label>Evidencia de cierre</Label>
+          <FileUpload
+            bucket={BUCKETS.PQRS}
+            pathPrefix={`closures/${pqrsId}`}
+            buttonLabel="Subir evidencia"
+            onUploaded={setEvidence}
+            onCleared={() => setEvidence(null)}
           />
         </div>
       </div>

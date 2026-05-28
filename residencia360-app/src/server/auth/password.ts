@@ -1,7 +1,10 @@
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 
+import "@/server/bootstrap";
 import { db } from "@/lib/db";
+import { buildEvent } from "@/server/domain/events/domain-events";
+import { eventBus } from "@/server/domain/events/event-bus";
 
 export async function createPasswordResetToken(email: string) {
   const user = await db.user.findUnique({
@@ -13,11 +16,12 @@ export async function createPasswordResetToken(email: string) {
   }
 
   const token = randomBytes(24).toString("hex");
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60);
   await db.passwordResetToken.create({
     data: {
       userId: user.id,
       token,
-      expiresAt: new Date(Date.now() + 1000 * 60 * 60),
+      expiresAt,
     },
   });
 
@@ -29,6 +33,14 @@ export async function createPasswordResetToken(email: string) {
       detail: "Solicitud de recuperacion de contrasena.",
     },
   });
+
+  await eventBus.publish(
+    buildEvent(
+      "PasswordResetSolicitado",
+      { userId: user.id, email: user.email, token, expiresAt },
+      user.id,
+    ),
+  );
 
   return token;
 }

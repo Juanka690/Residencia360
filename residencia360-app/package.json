@@ -7,9 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "postinstall": "prisma generate",
+    "vercel-build": "prisma migrate deploy && next build",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
@@ -36,6 +39,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "html5-qrcode": "^2.3.8",
     "lucide-react": "^1.7.0",
     "next": "^15.3.3",
     "next-auth": "^4.24.13",

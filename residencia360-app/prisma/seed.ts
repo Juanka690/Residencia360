@@ -37,6 +37,7 @@ function apartmentNumber(floor: number, index: number) {
 async function main() {
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
+  await prisma.notification.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.paymentSupport.deleteMany();
   await prisma.payment.deleteMany();
@@ -546,6 +547,47 @@ async function main() {
         entityType: "Reservation",
         entityId: reservations[0].id,
         detail: "Reserva del salón social quedó pendiente de aprobación.",
+      },
+    ],
+  });
+
+  await prisma.notification.createMany({
+    data: [
+      {
+        userId: resident1.id,
+        type: "VISITA_APROBADA",
+        title: "Visita aprobada: Mariana Hoyos",
+        body: "Tu visita VIS-0001 fue aprobada y queda lista para presentarse en portería.",
+        link: `/visitors/${visits[0].id}`,
+      },
+      {
+        userId: resident2.id,
+        type: "PQRS_RADICADA",
+        title: "PQRS PQRS-2026-0002 radicada",
+        body: "Tu PQRS se encuentra en estado Radicada y será asignada en breve.",
+        link: "/pqrs",
+      },
+      {
+        userId: admin.id,
+        type: "PQRS_RADICADA",
+        title: "Nueva PQRS PQRS-2026-0001",
+        body: "Se radicó una nueva PQRS con prioridad ALTA.",
+        link: "/pqrs",
+      },
+      {
+        userId: admin.id,
+        type: "PAGO_ENVIADO",
+        title: "Soporte de pago recibido: PAY-2026-0001",
+        body: "Hay un soporte de pago pendiente de revisión.",
+        link: "/accounting",
+      },
+      {
+        userId: resident1.id,
+        type: "COMUNICADO_CRITICO",
+        title: "URGENTE: Asamblea extraordinaria del mes",
+        body: "Convocatoria a propietarios para revisar presupuesto y seguridad.",
+        link: "/announcements",
+        readAt: new Date(),
       },
     ],
   });
